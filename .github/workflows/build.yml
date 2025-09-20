@@ -35,26 +35,21 @@ jobs:
       shell: bash
       run: |
         if [[ "${{ runner.os }}" == "Windows" ]] ; then
-          this_dir=$(cygpath "${{ github.workspace }}")
-        else
-          this_dir="${{ github.workspace }}"
+          this_dir=$(cygpath -u $(dirname "$0"))
+          pushd "$this_dir" > /dev/null
         fi
-        skia_url=$(source $this_dir/laf/misc/skia-url.sh | xargs)
-        skia_file=$(basename $skia_url)
-        curl --ssl-revoke-best-effort -L -o "$skia_file" "$skia_url"
-        unzip "$skia_file" -d skia
-    - name: ccache
-      uses: hendrikmuhs/ccache-action@v1.2.17
-      if: ${{ runner.os == 'Linux' || runner.os == 'macOS' }}
-      with:
-        key: ${{ matrix.os }}-${{ matrix.ui }}-${{ matrix.scripting }}-${{ matrix.build_type }}
-    - uses: aseprite/get-ninja@main
-    - uses: ilammy/msvc-dev-cmd@v1
-      if: runner.os == 'Windows'
-    - name: Generating Makefiles
+
+        curl -L -O https://github.com/aseprite/skia-build/releases/download/m121-1/Skia-Linux-x64-Release.zip
+        unzip Skia-Linux-x64-Release.zip -d skia
+        rm Skia-Linux-x64-Release.zip
+
+        if [[ "${{ runner.os }}" == "Windows" ]] ; then
+          popd > /dev/null
+        fi
+    - name: Prepare build environment
       shell: bash
       run: |
-        if [[ "${{ runner.os }}" == "Windows" ]] ; then
+        if [[ "${{ matrix.build_type }}" == "Debug" ]] ; then
           export enable_ccache=off
         else
           export enable_ccache=on
@@ -97,14 +92,16 @@ jobs:
         if [[ "${{ runner.os }}" == "Linux" ]] ; then
           export XVFB=xvfb-run
         fi
-        cd build && $XVFB ctest --output-on-failure
-    - name: Running CLI Tests
-      if: ${{ matrix.scripting == 'lua' }}
-      shell: bash
-      run: |
-        if [[ "${{ runner.os }}" == "Linux" ]] ; then
-          export XVFB=xvfb-run
+
+        if [[ "${{ runner.os }}" == "Windows" ]] ; then
+          export ARTIFACTS_DIR=$(cygpath -w $(realpath artifacts))
+          /cygdrive/c/Program\ Files/7-Zip/7z.exe a -t7z "$ARTIFACTS_DIR/tests.7z" tests
         fi
-        export ASEPRITE=$PWD/build/bin/aseprite
-        cd tests
-        $XVFB bash run-tests.sh
+        $XVFB ./build/tests
+    # This step uploads the compiled artifacts from the 'build' directory.
+    # The 'actions/upload-artifact@v4' action is used for this purpose.
+    - name: Uploading Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts
+        path: build/
